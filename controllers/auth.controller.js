@@ -1,142 +1,168 @@
-import prisma from "../config/prisma.js";
-import redis from "../config/redis.js";
-import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
-import { generateAccessToken, generateRefreshToken } from "../utils/token.js";
+import { AuthService } from "../services/auth.services.js";
+import { TokenService } from "../services/tokenService.js";
+import { ValidationService } from "../services/validationService.js";
+import {
+  ValidationError,
+  AuthenticationError,
+  ConflictError,
+} from "../utils/errors.js";
 
-const ACCESS_TOKEN_TTL = 60 * 15;
+const authService = new AuthService();
+const tokenService = new TokenService();
+const validationService = new ValidationService();
 
 /* SIGN UP */
-export const signup = async (req, res) => {
-  const { firstName, lastName, username, email, password, isInstructor } =
-    req.body;
+export const signup = async (req, res, next) => {
+  try {
+    // Validate input
+    const validation = validationService.validateSignupData(req.body);
+    if (!validation.isValid) {
+      throw new ValidationError("Validation failed", validation.errors);
+    }
 
-  if (!firstName || !lastName || !username || !email || !password) {
-    return res.status(400).json({ message: "All fields required" });
+    // Check if user exists
+    const { email, username } = req.body;
+    const existingUser = await authService.findUserByEmailOrUsername(email);
+    const existingUsername = await authService.findUserByEmailOrUsername(
+      username
+    );
+
+    if (existingUser || existingUsername) {
+      throw new ConflictError(
+        "User with this email or username already exists"
+      );
+    }
+
+    // Create user
+    const user = await authService.createUser(req.body);
+
+    res.status(201).json({
+      message: "Signup successful",
+      user,
+    });
+  } catch (error) {
+    next(error);
   }
-
-  const exists = await prisma.user.findFirst({
-    where: { OR: [{ email }, { username }] },
-  });
-
-  if (exists) return res.status(409).json({ message: "User exists" });
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  const user = await prisma.user.create({
-    data: {
-      firstName,
-      lastName,
-      username,
-      email,
-      password: hashedPassword,
-      isInstructor: Boolean(isInstructor),
-    },
-    select: {
-      id: true,
-      username: true,
-      email: true,
-    },
-  });
-
-  res.status(201).json({ message: "Signup successful", user });
 };
 
 /* SIGN IN */
-export const signin = async (req, res) => {
-  const { identifier, password } = req.body;
+export const signin = async (req, res, next) => {
+  try {
+    // Validate input
+    const validation = validationService.validateSigninData(req.body);
+    if (!validation.isValid) {
+      throw new ValidationError("Validation failed", validation.errors);
+    }
 
-  const user = await prisma.user.findFirst({
-    where: { OR: [{ email: identifier }, { username: identifier }] },
-  });
+    const { identifier, password } = req.body;
 
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(401).json({ message: "Invalid credentials" });
+    // Find user
+    const user = await authService.findUserByEmailOrUsername(identifier);
+    if (!user) {
+      throw new AuthenticationError("Invalid credentials");
+    }
+
+    // Verify password
+    const isValidPassword = await authService.verifyPassword(
+      password,
+      user.password
+    );
+    if (!isValidPassword) {
+      throw new AuthenticationError("Invalid credentials");
+    }
+
+    // Generate tokens
+    const { accessToken, refreshToken } = authService.generateTokens(user);
+
+    // Store tokens
+    await authService.updateRefreshToken(user.id, refreshToken);
+    await tokenService.storeAccessToken(user.id, accessToken);
+
+    // Set cookie
+    res.cookie(
+      "refreshToken",
+      refreshToken,
+      tokenService.createCookieOptions()
+    );
+
+    res.json({
+      message: "Login successful",
+      accessToken,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+      },
+    });
+  } catch (error) {
+    next(error);
   }
-
-  const accessToken = generateAccessToken(user);
-  const refreshToken = generateRefreshToken(user);
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { refreshToken },
-  });
-
-  await redis.set(`access_token:${user.id}`, accessToken, {
-    ex: ACCESS_TOKEN_TTL,
-  });
-
-  res.cookie("refreshToken", refreshToken, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "strict",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
-
-  res.json({
-    message: "Login successful",
-    accessToken,
-  });
 };
 
 /* REFRESH TOKEN */
-export const refreshToken = async (req, res) => {
-  const token = req.cookies.refreshToken;
-  if (!token) return res.status(401).json({ message: "Unauthorized" });
+export const refreshToken = async (req, res, next) => {
+  try {
+    const token = req.cookies.refreshToken;
 
-  const decoded = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET);
+    if (!token) {
+      throw new AuthenticationError("Refresh token not provided");
+    }
 
-  const user = await prisma.user.findUnique({ where: { id: decoded.id } });
-  if (!user || user.refreshToken !== token) {
-    return res.status(403).json({ message: "Forbidden" });
+    // Verify token
+    let decoded;
+    try {
+      decoded = tokenService.verifyRefreshToken(token);
+    } catch (error) {
+      throw new AuthenticationError("Invalid refresh token");
+    }
+
+    // Find user and validate token
+    const user = await authService.findUserById(decoded.id);
+    if (!user || user.refreshToken !== token) {
+      throw new AuthenticationError("Invalid refresh token");
+    }
+
+    // Generate new access token
+    const newAccessToken = authService.generateTokens(user).accessToken;
+    await tokenService.storeAccessToken(user.id, newAccessToken);
+
+    res.json({ accessToken: newAccessToken });
+  } catch (error) {
+    next(error);
   }
-
-  const newAccessToken = generateAccessToken(user);
-  await redis.set(`access_token:${user.id}`, newAccessToken, {
-    ex: ACCESS_TOKEN_TTL,
-  });
-
-  res.json({ accessToken: newAccessToken });
 };
 
 /* LOGOUT */
-export const logout = async (req, res) => {
-  await redis.del(`access_token:${req.user.id}`);
-  await prisma.user.update({
-    where: { id: req.user.id },
-    data: { refreshToken: null },
-  });
+export const logout = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
 
-  res.clearCookie("refreshToken");
-  res.json({ message: "Logged out" });
+    // Clear tokens
+    await tokenService.deleteAccessToken(userId);
+    await authService.clearRefreshToken(userId);
+
+    // Clear cookie
+    res.clearCookie("refreshToken");
+
+    res.json({ message: "Logged out successfully" });
+  } catch (error) {
+    next(error);
+  }
 };
 
-//get user name
-export const checkUsername = async (req, res) => {
+/* CHECK USERNAME AVAILABILITY */
+export const checkUsername = async (req, res, next) => {
   try {
     const { username } = req.query;
 
-    // 1. Validate input
-    if (!username) {
-      return res.status(400).json({
-        message: "Username is required",
-      });
+    if (!username?.trim()) {
+      throw new ValidationError("Username is required");
     }
 
-    // 2. Check username in DB
-    const user = await prisma.user.findUnique({
-      where: { username },
-      select: { id: true },
-    });
+    const exists = await authService.checkUsernameExists(username);
 
-    // 3. Response
-    return res.status(200).json({
-      exists: !!user,
-    });
+    res.status(200).json({ exists });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({
-      message: "Internal server error",
-    });
+    next(error);
   }
 };

@@ -2,6 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import authRoutes from "./routes/auth.routes.js";
 import cookieParser from "cookie-parser";
+import { errorHandler } from "./utils/errors.js";
 
 dotenv.config();
 
@@ -19,7 +20,8 @@ app.get("/", (req, res) => {
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
-
+// Error handling middleware - MUST be last
+app.use(errorHandler);
 //custome routes
 app.use("/api/auth", authRoutes);
 // Start server
