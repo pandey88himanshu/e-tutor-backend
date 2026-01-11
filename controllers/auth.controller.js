@@ -38,7 +38,10 @@ export const signup = async (req, res, next) => {
     }
 
     const otp = otpService.generateOTP();
-    await otpService.storeOTP(email, otp, req.body);
+    await otpService.storeOTP(email, otp, {
+      ...req.body,
+      username: username.trim(),
+    });
     await emailService.sendOTPEmail(email, otp, username);
 
     res.status(200).json({
@@ -82,13 +85,22 @@ export const verifyOTP = async (req, res, next) => {
       throw new ValidationError("No pending signup found");
     }
 
+    // 🚨 HARD VALIDATION (THIS WAS MISSING)
+    if (
+      !pendingUserData.username ||
+      typeof pendingUserData.username !== "string" ||
+      !pendingUserData.username.trim()
+    ) {
+      throw new ValidationError("Username is missing or invalid");
+    }
+
     // ✅ Create user (works for both Google & Email signup)
     const newUser = await authService.createUser({
       firstName: pendingUserData.firstName,
       lastName: pendingUserData.lastName,
-      username: pendingUserData.username,
+      username: pendingUserData.username.trim(), // ✅ FIX
       email: pendingUserData.email,
-      password: pendingUserData.password || null, // 👈 Google users have no password
+      password: pendingUserData.password || null,
       isInstructor: pendingUserData.isInstructor || false,
       provider: pendingUserData.provider || "local",
       googleId: pendingUserData.googleId || null,
@@ -173,11 +185,6 @@ export const resendOTP = async (req, res, next) => {
 /* SIGN IN */
 export const signin = async (req, res, next) => {
   try {
-    const validation = validationService.validateSigninData(req.body);
-    if (!validation.isValid) {
-      throw new ValidationError("Validation failed", validation.errors);
-    }
-
     const { identifier, password } = req.body;
 
     const user = await authService.findUserByEmailOrUsername(identifier);
@@ -185,30 +192,32 @@ export const signin = async (req, res, next) => {
       throw new AuthenticationError("Invalid credentials");
     }
 
-    // ✅ FIX 9: Check if user is OAuth user
     if (user.provider === "google" && !user.password) {
       throw new AuthenticationError(
         "This account uses Google Sign-In. Please login with Google."
       );
     }
 
-    // Verify password
+    if (!user.email || !user.username) {
+      throw new AuthenticationError(
+        "Account setup incomplete. Please login with Google."
+      );
+    }
+
     const isValidPassword = await authService.verifyPassword(
       password,
       user.password
     );
+
     if (!isValidPassword) {
       throw new AuthenticationError("Invalid credentials");
     }
 
-    // Generate tokens
     const { accessToken, refreshToken } = authService.generateTokens(user);
 
-    // Store tokens
     await authService.updateRefreshToken(user.id, refreshToken);
     await tokenService.storeAccessToken(user.id, accessToken);
 
-    // Set cookie
     res.cookie(
       "refreshToken",
       refreshToken,
@@ -220,8 +229,8 @@ export const signin = async (req, res, next) => {
       accessToken,
       user: {
         id: user.id,
-        username: user.username,
         email: user.email,
+        username: user.username,
       },
     });
   } catch (error) {
@@ -308,29 +317,31 @@ export const checkUsername = async (req, res, next) => {
 };
 
 /* oauth google */
-/* oauth google */
 export const googleCallback = async (req, res, next) => {
   try {
-    const { user, googleProfile } = req.user;
-    const email = googleProfile.emails[0].value;
+    const { dbUser, profile } = req.user;
 
-    // 🔹 CASE 1: User already exists → LOGIN
-    if (user) {
-      // ✅ FIX 2: If user exists but doesn't have googleId, update it
-      if (!user.googleId) {
+    const email = profile.emails?.[0]?.value;
+    if (!email) {
+      throw new AuthenticationError("Google account has no email");
+    }
+
+    // ───────────────────────── EXISTING USER ─────────────────────────
+    if (dbUser) {
+      if (!dbUser.googleId) {
         await prisma.user.update({
-          where: { id: user.id },
+          where: { id: dbUser.id },
           data: {
-            googleId: googleProfile.id,
+            googleId: profile.id,
             provider: "google",
           },
         });
       }
 
-      const { accessToken, refreshToken } = authService.generateTokens(user);
+      const { accessToken, refreshToken } = authService.generateTokens(dbUser);
 
-      await authService.updateRefreshToken(user.id, refreshToken);
-      await tokenService.storeAccessToken(user.id, accessToken);
+      await authService.updateRefreshToken(dbUser.id, refreshToken);
+      await tokenService.storeAccessToken(dbUser.id, accessToken);
 
       res.cookie(
         "refreshToken",
@@ -343,38 +354,33 @@ export const googleCallback = async (req, res, next) => {
       );
     }
 
-    // 🔹 CASE 2: New Google user → SEND OTP
+    // ───────────────────────── NEW USER (OTP FLOW) ─────────────────────────
     const otp = otpService.generateOTP();
-
-    // ✅ FIX 3: Generate unique username
     const baseUsername = email.split("@")[0];
-    const uniqueUsername = await generateUniqueUsername(baseUsername);
+    const username = await generateUniqueUsername(baseUsername);
 
     const pendingUser = {
       email,
-      firstName: googleProfile.name.givenName,
-      lastName: googleProfile.name.familyName || "",
-      username: uniqueUsername,
+      firstName: profile.name?.givenName || "User",
+      lastName: profile.name?.familyName || "",
+      username,
       provider: "google",
-      googleId: googleProfile.id,
-      password: null, // ✅ Explicitly set null for OAuth users
+      googleId: profile.id,
+      password: null,
     };
 
     await otpService.storeOTP(email, otp, pendingUser);
-    await emailService.sendOTPEmail(email, otp, pendingUser.username);
+    await emailService.sendOTPEmail(email, otp, username);
 
-    // ✅ FIX 4: Pass username to frontend for display
     return res.redirect(
       `${process.env.FRONTEND_URL}/verify-otp?email=${encodeURIComponent(
         email
-      )}&username=${encodeURIComponent(uniqueUsername)}&provider=google`
+      )}&username=${encodeURIComponent(username)}&provider=google`
     );
   } catch (err) {
-    console.error("❌ Google OAuth Error:", err);
+    console.error("❌ Google Callback Error:", err);
     return res.redirect(
-      `${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(
-        "Authentication failed"
-      )}`
+      `${process.env.FRONTEND_URL}/login?error=google_auth_failed`
     );
   }
 };

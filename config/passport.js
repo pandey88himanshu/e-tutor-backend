@@ -11,22 +11,20 @@ passport.use(
     },
     async (_, __, profile, done) => {
       try {
-        const email = profile.emails[0].value;
-        const googleId = profile.id;
+        const email = profile.emails?.[0]?.value;
+        if (!email) {
+          return done(new Error("No email from Google"), null);
+        }
 
-        // ✅ FIX 1: Check by BOTH email AND googleId
-        const user = await prisma.user.findFirst({
+        const dbUser = await prisma.user.findFirst({
           where: {
-            OR: [
-              { email }, // Existing user with same email
-              { googleId }, // Existing Google account
-            ],
+            OR: [{ email }, { googleId: profile.id }],
           },
         });
 
         return done(null, {
-          googleProfile: profile,
-          user, // may be null for new users
+          dbUser, // ✅ MATCH CONTROLLER
+          profile, // ✅ MATCH CONTROLLER
         });
       } catch (err) {
         return done(err, null);
