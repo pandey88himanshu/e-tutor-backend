@@ -9,16 +9,15 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT;
 const corsOptions = {
-  origin: "http://localhost:3000", // Specify exact frontend origin (no wildcard!)
-  credentials: true, // Allow cookies/credentials
-  // Optional: allowed methods/headers if needed
-  // methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  // allowedHeaders: ['Content-Type', 'Authorization'],
+  origin: "http://localhost:3000",
+  credentials: true,
 };
+
 // Middleware
 app.use(express.json());
 app.use(cors(corsOptions));
 app.use(cookieParser());
+
 // Routes
 app.get("/", (req, res) => {
   res.send("Hello from Express Server");
@@ -27,10 +26,13 @@ app.get("/", (req, res) => {
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
-// Error handling middleware - MUST be last
-app.use(errorHandler);
-//custome routes
+
+// Custom routes - MUST come before error handler
 app.use("/api/auth", authRoutes);
+
+// Error handling middleware - MUST be last (after all routes)
+app.use(errorHandler);
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

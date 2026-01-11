@@ -32,6 +32,13 @@ export class ConflictError extends AppError {
   }
 }
 
+// Add this new error class
+export class RateLimitError extends AppError {
+  constructor(message = "Too many requests") {
+    super(message, 429);
+  }
+}
+
 // Error handling middleware
 export const errorHandler = (err, req, res, next) => {
   const statusCode = err.statusCode || 500;

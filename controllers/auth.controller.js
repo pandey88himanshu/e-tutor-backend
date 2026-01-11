@@ -1,27 +1,31 @@
 import { AuthService } from "../services/auth.services.js";
-import { TokenService } from "../services/tokenService.js";
-import { ValidationService } from "../services/validationService.js";
+import { EmailService } from "../services/email.service.js";
+import { OTPService } from "../services/otp.service.js";
+import { TokenService } from "../services/token.service.js";
+import { ValidationService } from "../services/validation.service.js";
 import {
   ValidationError,
   AuthenticationError,
   ConflictError,
+  RateLimitError,
 } from "../utils/errors.js";
 
 const authService = new AuthService();
 const tokenService = new TokenService();
 const validationService = new ValidationService();
+const otpService = new OTPService();
+const emailService = new EmailService();
 
-/* SIGN UP */
+/* SIGN UP - Send OTP */
 export const signup = async (req, res, next) => {
   try {
-    // Validate input
     const validation = validationService.validateSignupData(req.body);
     if (!validation.isValid) {
       throw new ValidationError("Validation failed", validation.errors);
     }
 
-    // Check if user exists
     const { email, username } = req.body;
+
     const existingUser = await authService.findUserByEmailOrUsername(email);
     const existingUsername = await authService.findUserByEmailOrUsername(
       username
@@ -33,12 +37,131 @@ export const signup = async (req, res, next) => {
       );
     }
 
-    // Create user
-    const user = await authService.createUser(req.body);
+    const otp = otpService.generateOTP();
+    await otpService.storeOTP(email, otp, req.body);
+    await emailService.sendOTPEmail(email, otp, username);
 
+    res.status(200).json({
+      message: "OTP sent successfully to your email",
+      email,
+      expiresIn: 600,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyOTP = async (req, res, next) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      throw new ValidationError("Email and OTP are required");
+    }
+
+    console.log("🔍 Verify OTP Request:", {
+      email,
+      otp,
+      otpType: typeof otp,
+      otpLength: otp.length,
+    });
+
+    const verification = await otpService.verifyOTP(email, otp);
+
+    console.log("✅ Verification result:", verification);
+
+    if (!verification.isValid) {
+      console.error("❌ OTP Invalid:", verification.error);
+      throw new AuthenticationError(verification.error);
+    }
+
+    // Get the pending user data
+    const pendingUserData = await otpService.getPendingUser(email);
+
+    if (!pendingUserData) {
+      throw new ValidationError("No pending signup found");
+    }
+
+    // Create the user (authService.createUser will hash the password)
+    const newUser = await authService.createUser({
+      firstName: pendingUserData.firstName,
+      lastName: pendingUserData.lastName,
+      username: pendingUserData.username,
+      email: pendingUserData.email,
+      password: pendingUserData.password,
+      isInstructor: pendingUserData.isInstructor || false,
+    });
+
+    // Generate tokens
+    const { accessToken, refreshToken } = authService.generateTokens(newUser);
+
+    // Store tokens
+    await authService.updateRefreshToken(newUser.id, refreshToken);
+    await tokenService.storeAccessToken(newUser.id, accessToken);
+
+    // Set cookie
+    res.cookie(
+      "refreshToken",
+      refreshToken,
+      tokenService.createCookieOptions()
+    );
+
+    // Clean up OTP data
+    await otpService.clearOTPData(email);
+
+    // Send response
     res.status(201).json({
       message: "Signup successful",
-      user,
+      accessToken,
+      user: {
+        id: newUser.id,
+        username: newUser.username,
+        email: newUser.email,
+      },
+    });
+  } catch (error) {
+    console.error("💥 Verify OTP Error:", error);
+    next(error);
+  }
+};
+
+/* RESEND OTP */
+export const resendOTP = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      throw new ValidationError("Email is required");
+    }
+
+    const canResend = await otpService.canResendOTP(email);
+    if (!canResend.allowed) {
+      // Check if it's a rate limit/cooldown error
+      if (
+        canResend.error.includes("wait") ||
+        canResend.error.includes("seconds")
+      ) {
+        throw new RateLimitError(canResend.error); // ← Using RateLimitError here
+      }
+      throw new ValidationError(canResend.error);
+    }
+
+    const pendingUserData = await otpService.getPendingUser(email);
+    if (!pendingUserData) {
+      throw new ValidationError("No pending signup found");
+    }
+
+    const otp = otpService.generateOTP();
+    await otpService.storeOTP(email, otp, pendingUserData);
+    await otpService.incrementResendCount(email);
+    await emailService.sendOTPEmail(email, otp, pendingUserData.username);
+
+    const expiresIn = await otpService.getOTPExpiry(email);
+
+    res.status(200).json({
+      message: "OTP resent successfully",
+      email,
+      expiresIn,
     });
   } catch (error) {
     next(error);
@@ -102,31 +225,41 @@ export const signin = async (req, res, next) => {
 /* REFRESH TOKEN */
 export const refreshToken = async (req, res, next) => {
   try {
-    const token = req.cookies.refreshToken;
+    const oldRefreshToken = req.cookies.refreshToken;
 
-    if (!token) {
+    if (!oldRefreshToken) {
       throw new AuthenticationError("Refresh token not provided");
     }
 
-    // Verify token
-    let decoded;
-    try {
-      decoded = tokenService.verifyRefreshToken(token);
-    } catch (error) {
-      throw new AuthenticationError("Invalid refresh token");
-    }
+    const decoded = tokenService.verifyRefreshToken(oldRefreshToken);
 
-    // Find user and validate token
     const user = await authService.findUserById(decoded.id);
-    if (!user || user.refreshToken !== token) {
+    if (!user || user.refreshToken !== oldRefreshToken) {
       throw new AuthenticationError("Invalid refresh token");
     }
 
-    // Generate new access token
-    const newAccessToken = authService.generateTokens(user).accessToken;
-    await tokenService.storeAccessToken(user.id, newAccessToken);
+    // 🔁 Rotate tokens
+    const accessToken = tokenService.generateAccessToken({
+      id: user.id,
+      email: user.email,
+    });
 
-    res.json({ accessToken: newAccessToken });
+    const newRefreshToken = tokenService.generateRefreshToken({
+      id: user.id,
+    });
+
+    // Update refresh token in DB
+    await authService.updateRefreshToken(user.id, newRefreshToken);
+
+    // Set new refresh token cookie
+    res.cookie("refreshToken", newRefreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "strict",
+      path: "/auth/refresh",
+    });
+
+    return res.json({ accessToken });
   } catch (error) {
     next(error);
   }
