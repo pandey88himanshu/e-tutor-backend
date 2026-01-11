@@ -4,12 +4,14 @@ import authRoutes from "./routes/auth.routes.js";
 import cookieParser from "cookie-parser";
 import { errorHandler } from "./utils/errors.js";
 import cors from "cors";
+import passport from "passport";
+import "./config/passport.js";
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT;
 const corsOptions = {
-  origin: "http://localhost:3000",
+  origin: process.env.FRONTEND_URL,
   credentials: true,
 };
 
@@ -17,6 +19,7 @@ const corsOptions = {
 app.use(express.json());
 app.use(cors(corsOptions));
 app.use(cookieParser());
+app.use(passport.initialize());
 
 // Routes
 app.get("/", (req, res) => {

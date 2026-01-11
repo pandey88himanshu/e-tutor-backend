@@ -8,18 +8,18 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  firstName    String
-  lastName     String
-  username     String   @unique
-  email        String   @unique
-  password     String
-
-  isUser       Boolean  @default(true)
-  isInstructor Boolean  @default(false)
-
-  refreshToken String?
-
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String    @id @default(uuid())
+  email         String    @unique
+  username      String    @unique
+  password      String?   // ✅ Make nullable for OAuth users
+  firstName     String
+  lastName      String?
+  isInstructor  Boolean   @default(false)
+  provider      String    @default("local") // ✅ 'local' or 'google'
+  googleId      String?   @unique // ✅ Store Google ID
+  refreshToken  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
+
+

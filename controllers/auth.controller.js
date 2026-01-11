@@ -75,21 +75,23 @@ export const verifyOTP = async (req, res, next) => {
       throw new AuthenticationError(verification.error);
     }
 
-    // Get the pending user data
+    // Get pending user data (email signup OR google signup)
     const pendingUserData = await otpService.getPendingUser(email);
 
     if (!pendingUserData) {
       throw new ValidationError("No pending signup found");
     }
 
-    // Create the user (authService.createUser will hash the password)
+    // ✅ Create user (works for both Google & Email signup)
     const newUser = await authService.createUser({
       firstName: pendingUserData.firstName,
       lastName: pendingUserData.lastName,
       username: pendingUserData.username,
       email: pendingUserData.email,
-      password: pendingUserData.password,
+      password: pendingUserData.password || null, // 👈 Google users have no password
       isInstructor: pendingUserData.isInstructor || false,
+      provider: pendingUserData.provider || "local",
+      googleId: pendingUserData.googleId || null,
     });
 
     // Generate tokens
@@ -171,7 +173,6 @@ export const resendOTP = async (req, res, next) => {
 /* SIGN IN */
 export const signin = async (req, res, next) => {
   try {
-    // Validate input
     const validation = validationService.validateSigninData(req.body);
     if (!validation.isValid) {
       throw new ValidationError("Validation failed", validation.errors);
@@ -179,10 +180,16 @@ export const signin = async (req, res, next) => {
 
     const { identifier, password } = req.body;
 
-    // Find user
     const user = await authService.findUserByEmailOrUsername(identifier);
     if (!user) {
       throw new AuthenticationError("Invalid credentials");
+    }
+
+    // ✅ FIX 9: Check if user is OAuth user
+    if (user.provider === "google" && !user.password) {
+      throw new AuthenticationError(
+        "This account uses Google Sign-In. Please login with Google."
+      );
     }
 
     // Verify password
@@ -299,3 +306,88 @@ export const checkUsername = async (req, res, next) => {
     next(error);
   }
 };
+
+/* oauth google */
+/* oauth google */
+export const googleCallback = async (req, res, next) => {
+  try {
+    const { user, googleProfile } = req.user;
+    const email = googleProfile.emails[0].value;
+
+    // 🔹 CASE 1: User already exists → LOGIN
+    if (user) {
+      // ✅ FIX 2: If user exists but doesn't have googleId, update it
+      if (!user.googleId) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            googleId: googleProfile.id,
+            provider: "google",
+          },
+        });
+      }
+
+      const { accessToken, refreshToken } = authService.generateTokens(user);
+
+      await authService.updateRefreshToken(user.id, refreshToken);
+      await tokenService.storeAccessToken(user.id, accessToken);
+
+      res.cookie(
+        "refreshToken",
+        refreshToken,
+        tokenService.createCookieOptions()
+      );
+
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/oauth-success?token=${accessToken}`
+      );
+    }
+
+    // 🔹 CASE 2: New Google user → SEND OTP
+    const otp = otpService.generateOTP();
+
+    // ✅ FIX 3: Generate unique username
+    const baseUsername = email.split("@")[0];
+    const uniqueUsername = await generateUniqueUsername(baseUsername);
+
+    const pendingUser = {
+      email,
+      firstName: googleProfile.name.givenName,
+      lastName: googleProfile.name.familyName || "",
+      username: uniqueUsername,
+      provider: "google",
+      googleId: googleProfile.id,
+      password: null, // ✅ Explicitly set null for OAuth users
+    };
+
+    await otpService.storeOTP(email, otp, pendingUser);
+    await emailService.sendOTPEmail(email, otp, pendingUser.username);
+
+    // ✅ FIX 4: Pass username to frontend for display
+    return res.redirect(
+      `${process.env.FRONTEND_URL}/verify-otp?email=${encodeURIComponent(
+        email
+      )}&username=${encodeURIComponent(uniqueUsername)}&provider=google`
+    );
+  } catch (err) {
+    console.error("❌ Google OAuth Error:", err);
+    return res.redirect(
+      `${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(
+        "Authentication failed"
+      )}`
+    );
+  }
+};
+
+// ✅ FIX 5: Helper function to generate unique username
+async function generateUniqueUsername(baseUsername) {
+  let username = baseUsername;
+  let counter = 1;
+
+  while (await authService.checkUsernameExists(username)) {
+    username = `${baseUsername}${counter}`;
+    counter++;
+  }
+
+  return username;
+}

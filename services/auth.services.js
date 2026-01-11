@@ -5,10 +5,19 @@ import { generateAccessToken, generateRefreshToken } from "../utils/token.js";
 
 export class AuthService {
   async createUser(userData) {
-    const { firstName, lastName, username, email, password, isInstructor } =
-      userData;
+    const {
+      firstName,
+      lastName,
+      username,
+      email,
+      password,
+      isInstructor,
+      provider,
+      googleId,
+    } = userData;
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // ✅ FIX 6: Only hash password if it exists
+    const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
 
     return await prisma.user.create({
       data: {
@@ -18,6 +27,8 @@ export class AuthService {
         email,
         password: hashedPassword,
         isInstructor: Boolean(isInstructor),
+        provider: provider || "local", // ✅ Default to 'local'
+        googleId: googleId || null,
       },
       select: {
         id: true,
@@ -25,6 +36,8 @@ export class AuthService {
         email: true,
         firstName: true,
         lastName: true,
+        provider: true,
+        googleId: true,
       },
     });
   }
@@ -37,6 +50,13 @@ export class AuthService {
     });
   }
 
+  // ✅ FIX 7: Add method to find by Google ID
+  async findUserByGoogleId(googleId) {
+    return await prisma.user.findUnique({
+      where: { googleId },
+    });
+  }
+
   async findUserById(userId) {
     return await prisma.user.findUnique({
       where: { id: userId },
@@ -44,6 +64,10 @@ export class AuthService {
   }
 
   async verifyPassword(plainPassword, hashedPassword) {
+    // ✅ FIX 8: Handle null password for OAuth users
+    if (!hashedPassword) {
+      return false;
+    }
     return await bcrypt.compare(plainPassword, hashedPassword);
   }
 
