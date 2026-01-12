@@ -11,12 +11,12 @@ model User {
   id            String    @id @default(uuid())
   email         String    @unique
   username      String    @unique
-  password      String?   // ✅ Make nullable for OAuth users
+  password      String?
   firstName     String
   lastName      String?
   isInstructor  Boolean   @default(false)
-  provider      String    @default("local") // ✅ 'local' or 'google'
-  googleId      String?   @unique // ✅ Store Google ID
+  provider      String    @default("local")
+  googleId      String?   @unique
   refreshToken  String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
