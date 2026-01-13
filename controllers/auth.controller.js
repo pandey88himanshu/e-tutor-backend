@@ -317,7 +317,7 @@ export const checkUsername = async (req, res, next) => {
 };
 
 /* oauth google */
-export const googleCallback = async (req, res, next) => {
+export const googleCallback = async (req, res) => {
   try {
     const { dbUser, profile } = req.user;
 
@@ -339,7 +339,6 @@ export const googleCallback = async (req, res, next) => {
       }
 
       const { accessToken, refreshToken } = authService.generateTokens(dbUser);
-
       await authService.updateRefreshToken(dbUser.id, refreshToken);
       await tokenService.storeAccessToken(dbUser.id, accessToken);
 
@@ -354,28 +353,34 @@ export const googleCallback = async (req, res, next) => {
       );
     }
 
-    // ───────────────────────── NEW USER (OTP FLOW) ─────────────────────────
-    const otp = otpService.generateOTP();
+    // ───────────────────────── NEW USER (NO OTP) ─────────────────────────
     const baseUsername = email.split("@")[0];
     const username = await generateUniqueUsername(baseUsername);
 
-    const pendingUser = {
+    const newUser = await authService.createUser({
       email,
       firstName: profile.name?.givenName || "User",
       lastName: profile.name?.familyName || "",
       username,
+      password: null, // ✅ OAuth user
       provider: "google",
       googleId: profile.id,
-      password: null,
-    };
+      isInstructor: false,
+    });
 
-    await otpService.storeOTP(email, otp, pendingUser);
-    await emailService.sendOTPEmail(email, otp, username);
+    const { accessToken, refreshToken } = authService.generateTokens(newUser);
+
+    await authService.updateRefreshToken(newUser.id, refreshToken);
+    await tokenService.storeAccessToken(newUser.id, accessToken);
+
+    res.cookie(
+      "refreshToken",
+      refreshToken,
+      tokenService.createCookieOptions()
+    );
 
     return res.redirect(
-      `${process.env.FRONTEND_URL}/verify-otp?email=${encodeURIComponent(
-        email
-      )}&username=${encodeURIComponent(username)}&provider=google`
+      `${process.env.FRONTEND_URL}/oauth-success?token=${accessToken}`
     );
   } catch (err) {
     console.error("❌ Google Callback Error:", err);
