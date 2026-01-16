@@ -4,6 +4,29 @@ import jwt from "jsonwebtoken";
 const ACCESS_TOKEN_TTL = 60 * 15; // 15 minutes
 
 export class TokenService {
+  // ✅ ADDED: Generate Access Token
+  generateAccessToken(user) {
+    return jwt.sign(
+      {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        role: user.role, // Crucial for Admin checks
+      },
+      process.env.ACCESS_TOKEN_SECRET,
+      { expiresIn: process.env.ACCESS_TOKEN_EXPIRE || "15m" }
+    );
+  }
+
+  // ✅ ADDED: Generate Refresh Token
+  generateRefreshToken(user) {
+    return jwt.sign({ id: user.id }, process.env.REFRESH_TOKEN_SECRET, {
+      expiresIn: process.env.REFRESH_TOKEN_EXPIRE || "7d",
+    });
+  }
+
+  // --- Existing Storage Methods ---
+
   async storeAccessToken(userId, accessToken) {
     await redis.set(`access_token:${userId}`, accessToken, {
       ex: ACCESS_TOKEN_TTL,

@@ -1,7 +1,6 @@
-// services/authService.js
-import prisma from "../config/prisma.js";
 import bcrypt from "bcrypt";
 import { generateAccessToken, generateRefreshToken } from "../utils/token.js";
+import prisma from "../config/prisma.js";
 
 export class AuthService {
   async createUser(userData) {
@@ -11,14 +10,15 @@ export class AuthService {
       username,
       email,
       password,
-      isInstructor,
+      role, // ✅ CHANGED: Receive 'role' instead of 'isInstructor'
       provider,
       googleId,
     } = userData;
 
-    // ✅ FIX 6: Only hash password if it exists
+    // Only hash password if it exists (skip for Google Auth)
     const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
 
+    // ✅ FIX: Use 'role' enum. Default to "USER" if undefined.
     return await prisma.user.create({
       data: {
         firstName,
@@ -26,19 +26,29 @@ export class AuthService {
         username,
         email,
         password: hashedPassword,
-        isInstructor: Boolean(isInstructor),
-        provider: provider || "local", // ✅ Default to 'local'
+        role: role || "USER", // Map to your Prisma Enum
+        provider: provider || "local",
         googleId: googleId || null,
       },
+      // Return these fields to the controller
       select: {
         id: true,
         username: true,
         email: true,
         firstName: true,
         lastName: true,
+        role: true, // ✅ Return role so frontend knows permissions
         provider: true,
         googleId: true,
       },
+    });
+  }
+
+  // ✅ NEW: Required for your Google OAuth Controller
+  async updateUser(userId, data) {
+    return await prisma.user.update({
+      where: { id: userId },
+      data: data,
     });
   }
 
@@ -50,7 +60,6 @@ export class AuthService {
     });
   }
 
-  // ✅ FIX 7: Add method to find by Google ID
   async findUserByGoogleId(googleId) {
     return await prisma.user.findUnique({
       where: { googleId },
@@ -64,7 +73,7 @@ export class AuthService {
   }
 
   async verifyPassword(plainPassword, hashedPassword) {
-    // ✅ FIX 8: Handle null password for OAuth users
+    // Handle null password for OAuth users
     if (!hashedPassword) {
       return false;
     }

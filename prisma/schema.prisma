@@ -1,3 +1,4 @@
+// 1. Configuration
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,6 +8,20 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// 2. Enums
+enum Role {
+  USER        
+  INSTRUCTOR  
+  ADMIN       
+}
+
+enum ApplicationStatus {
+  PENDING           
+  APPROVED          
+  REJECTED         
+}
+
+// 3. User Model
 model User {
   id            String    @id @default(uuid())
   email         String    @unique
@@ -14,12 +29,94 @@ model User {
   password      String?
   firstName     String
   lastName      String?
-  isInstructor  Boolean   @default(false)
-  provider      String    @default("local")
+  
+  // Authorization
+  role          Role      @default(USER)
+  provider      String    @default("local") 
   googleId      String?   @unique
-  refreshToken  String?
+
+  // ✅ RESTORED FIELD
+  refreshToken  String?   // <--- ADD THIS LINE BACK
+  
+  // Profile
+  bio           String?   @db.Text
+  profileImage  String?
+
+  // --- Relationships ---
+  instructorApplication InstructorApplication?
+  createdCourses        Course[]  @relation("InstructorCourses")
+  purchases             Purchase[]
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
 
+// 4. Instructor Application 
+model InstructorApplication {
+  id            String            @id @default(uuid())
+  
+  // Link to the Applicant
+  userId        String            @unique
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // --- Form Fields ---
+  phone         String?
+  yearsOfExp    Int
+  expertise     String            // Beginner/Intermediate/Expert
+  category      String            // e.g. Web Dev, DevOps
+  about         String            @db.Text
+  
+  resumeUrl     String?
+  introVideoUrl String?
+
+  // --- AI Interview Data ---
+  vapiCallId      String?         // Reference to Vapi call
+  transcription   String?         @db.Text
+  
+  // LLM Grading
+  aiScore         Int?            // e.g. 85
+  aiFeedback      String?         @db.Text 
+  
+  // --- Admin Management ---
+  status          ApplicationStatus @default(PENDING)
+
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+// 5. Course Model
+model Course {
+  id            String    @id @default(uuid())
+  title         String
+  description   String?   @db.Text
+  thumbnailUrl  String?
+  price         Float
+  isPublished   Boolean   @default(false)
+
+  // Instructor
+  instructorId  String
+  instructor    User      @relation("InstructorCourses", fields: [instructorId], references: [id])
+
+  // Students
+  purchases     Purchase[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+// 6. Purchase Model
+model Purchase {
+  id        String   @id @default(uuid())
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  pricePaid Float
+  createdAt DateTime @default(now())
+
+  @@unique([userId, courseId])
+  @@index([userId])
+}

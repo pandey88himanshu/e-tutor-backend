@@ -24,7 +24,7 @@ export const signup = async (req, res, next) => {
       throw new ValidationError("Validation failed", validation.errors);
     }
 
-    const { email, username } = req.body;
+    const { email, username, adminSecret } = req.body; // Extract adminSecret here
 
     const existingUser = await authService.findUserByEmailOrUsername(email);
     const existingUsername = await authService.findUserByEmailOrUsername(
@@ -38,10 +38,15 @@ export const signup = async (req, res, next) => {
     }
 
     const otp = otpService.generateOTP();
+
+    // Store ALL signup data (including adminSecret) in Redis/Temp
     await otpService.storeOTP(email, otp, {
       ...req.body,
       username: username.trim(),
+      // Ensure adminSecret is passed so we can check it in verifyOTP
+      adminSecret: adminSecret || null,
     });
+
     await emailService.sendOTPEmail(email, otp, username);
 
     res.status(200).json({
@@ -54,6 +59,7 @@ export const signup = async (req, res, next) => {
   }
 };
 
+/* VERIFY OTP & CREATE USER */
 export const verifyOTP = async (req, res, next) => {
   try {
     const { email, otp } = req.body;
@@ -62,30 +68,18 @@ export const verifyOTP = async (req, res, next) => {
       throw new ValidationError("Email and OTP are required");
     }
 
-    console.log("🔍 Verify OTP Request:", {
-      email,
-      otp,
-      otpType: typeof otp,
-      otpLength: otp.length,
-    });
-
     const verification = await otpService.verifyOTP(email, otp);
-
-    console.log("✅ Verification result:", verification);
-
     if (!verification.isValid) {
-      console.error("❌ OTP Invalid:", verification.error);
       throw new AuthenticationError(verification.error);
     }
 
-    // Get pending user data (email signup OR google signup)
+    // Get pending user data
     const pendingUserData = await otpService.getPendingUser(email);
-
     if (!pendingUserData) {
       throw new ValidationError("No pending signup found");
     }
 
-    // 🚨 HARD VALIDATION (THIS WAS MISSING)
+    // Validation
     if (
       !pendingUserData.username ||
       typeof pendingUserData.username !== "string" ||
@@ -94,14 +88,23 @@ export const verifyOTP = async (req, res, next) => {
       throw new ValidationError("Username is missing or invalid");
     }
 
-    // ✅ Create user (works for both Google & Email signup)
+    // --- 🚨 LOGIC FIX: Determine Role ---
+    let userRole = "USER";
+    if (pendingUserData.adminSecret === process.env.ADMIN_CREATION_KEY) {
+      userRole = "ADMIN";
+    }
+
+    // Create User
     const newUser = await authService.createUser({
       firstName: pendingUserData.firstName,
       lastName: pendingUserData.lastName,
-      username: pendingUserData.username.trim(), // ✅ FIX
+      username: pendingUserData.username.trim(),
       email: pendingUserData.email,
       password: pendingUserData.password || null,
-      isInstructor: pendingUserData.isInstructor || false,
+
+      // ✅ FIX: Use 'role' Enum, not isInstructor
+      role: userRole,
+
       provider: pendingUserData.provider || "local",
       googleId: pendingUserData.googleId || null,
     });
@@ -123,7 +126,6 @@ export const verifyOTP = async (req, res, next) => {
     // Clean up OTP data
     await otpService.clearOTPData(email);
 
-    // Send response
     res.status(201).json({
       message: "Signup successful",
       accessToken,
@@ -131,6 +133,7 @@ export const verifyOTP = async (req, res, next) => {
         id: newUser.id,
         username: newUser.username,
         email: newUser.email,
+        role: newUser.role, // Return role to frontend
       },
     });
   } catch (error) {
@@ -150,12 +153,11 @@ export const resendOTP = async (req, res, next) => {
 
     const canResend = await otpService.canResendOTP(email);
     if (!canResend.allowed) {
-      // Check if it's a rate limit/cooldown error
       if (
         canResend.error.includes("wait") ||
         canResend.error.includes("seconds")
       ) {
-        throw new RateLimitError(canResend.error); // ← Using RateLimitError here
+        throw new RateLimitError(canResend.error);
       }
       throw new ValidationError(canResend.error);
     }
@@ -198,12 +200,6 @@ export const signin = async (req, res, next) => {
       );
     }
 
-    if (!user.email || !user.username) {
-      throw new AuthenticationError(
-        "Account setup incomplete. Please login with Google."
-      );
-    }
-
     const isValidPassword = await authService.verifyPassword(
       password,
       user.password
@@ -231,6 +227,7 @@ export const signin = async (req, res, next) => {
         id: user.id,
         email: user.email,
         username: user.username,
+        role: user.role, // Return role
       },
     });
   } catch (error) {
@@ -248,29 +245,28 @@ export const refreshToken = async (req, res, next) => {
     }
 
     const decoded = tokenService.verifyRefreshToken(oldRefreshToken);
-
     const user = await authService.findUserById(decoded.id);
+
     if (!user || user.refreshToken !== oldRefreshToken) {
       throw new AuthenticationError("Invalid refresh token");
     }
 
-    // 🔁 Rotate tokens
+    // Rotate tokens
     const accessToken = tokenService.generateAccessToken({
       id: user.id,
       email: user.email,
+      role: user.role, // Include role in new token
     });
 
     const newRefreshToken = tokenService.generateRefreshToken({
       id: user.id,
     });
 
-    // Update refresh token in DB
     await authService.updateRefreshToken(user.id, newRefreshToken);
 
-    // Set new refresh token cookie
     res.cookie("refreshToken", newRefreshToken, {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
       path: "/auth/refresh",
     });
@@ -284,57 +280,49 @@ export const refreshToken = async (req, res, next) => {
 /* LOGOUT */
 export const logout = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-
-    // Clear tokens
-    await tokenService.deleteAccessToken(userId);
-    await authService.clearRefreshToken(userId);
-
-    // Clear cookie
+    const userId = req.user?.id; // Safe access
+    if (userId) {
+      await tokenService.deleteAccessToken(userId);
+      await authService.clearRefreshToken(userId);
+    }
     res.clearCookie("refreshToken");
-
     res.json({ message: "Logged out successfully" });
   } catch (error) {
     next(error);
   }
 };
 
-/* CHECK USERNAME AVAILABILITY */
+/* CHECK USERNAME */
 export const checkUsername = async (req, res, next) => {
   try {
     const { username } = req.query;
-
     if (!username?.trim()) {
       throw new ValidationError("Username is required");
     }
-
     const exists = await authService.checkUsernameExists(username);
-
     res.status(200).json({ exists });
   } catch (error) {
     next(error);
   }
 };
 
-/* oauth google */
+/* GOOGLE OAUTH CALLBACK */
 export const googleCallback = async (req, res) => {
   try {
     const { dbUser, profile } = req.user;
-
     const email = profile.emails?.[0]?.value;
+
     if (!email) {
       throw new AuthenticationError("Google account has no email");
     }
 
-    // ───────────────────────── EXISTING USER ─────────────────────────
+    // ── CASE A: EXISTING USER ──
     if (dbUser) {
       if (!dbUser.googleId) {
-        await prisma.user.update({
-          where: { id: dbUser.id },
-          data: {
-            googleId: profile.id,
-            provider: "google",
-          },
+        // ✅ FIX: Use service instead of direct prisma call
+        await authService.updateUser(dbUser.id, {
+          googleId: profile.id,
+          provider: "google",
         });
       }
 
@@ -353,7 +341,7 @@ export const googleCallback = async (req, res) => {
       );
     }
 
-    // ───────────────────────── NEW USER (NO OTP) ─────────────────────────
+    // ── CASE B: NEW USER ──
     const baseUsername = email.split("@")[0];
     const username = await generateUniqueUsername(baseUsername);
 
@@ -362,14 +350,15 @@ export const googleCallback = async (req, res) => {
       firstName: profile.name?.givenName || "User",
       lastName: profile.name?.familyName || "",
       username,
-      password: null, // ✅ OAuth user
+      password: null,
       provider: "google",
       googleId: profile.id,
-      isInstructor: false,
+
+      // ✅ FIX: Default Google users to USER (Student)
+      role: "USER",
     });
 
     const { accessToken, refreshToken } = authService.generateTokens(newUser);
-
     await authService.updateRefreshToken(newUser.id, refreshToken);
     await tokenService.storeAccessToken(newUser.id, accessToken);
 
@@ -390,8 +379,10 @@ export const googleCallback = async (req, res) => {
   }
 };
 
-// ✅ FIX 5: Helper function to generate unique username
+// Helper function
 async function generateUniqueUsername(baseUsername) {
+  // Need to use the authService instance
+  const authService = new AuthService();
   let username = baseUsername;
   let counter = 1;
 
@@ -399,6 +390,5 @@ async function generateUniqueUsername(baseUsername) {
     username = `${baseUsername}${counter}`;
     counter++;
   }
-
   return username;
 }

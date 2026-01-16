@@ -44,4 +44,37 @@ export class ValidationService {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
   }
+
+  validateInstructorApplication(data) {
+    const {
+      phone,
+      yearsOfExp,
+      expertise,
+      category,
+      about,
+      resumeUrl,
+      introVideoUrl,
+    } = data;
+    const errors = [];
+
+    if (!phone?.trim()) errors.push("Phone number is required");
+    if (!yearsOfExp && yearsOfExp !== 0)
+      errors.push("Years of experience is required");
+    if (!expertise?.trim()) errors.push("Expertise level is required");
+    if (!category?.trim()) errors.push("Teaching category is required");
+    if (!about?.trim()) errors.push("About section is required");
+    if (about && about.length < 20)
+      errors.push("About section must be at least 20 characters");
+
+    // Basic URL validation
+    if (resumeUrl && !resumeUrl.startsWith("http"))
+      errors.push("Invalid Resume URL");
+    if (introVideoUrl && !introVideoUrl.startsWith("http"))
+      errors.push("Invalid Video URL");
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+    };
+  }
 }

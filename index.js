@@ -6,6 +6,8 @@ import { errorHandler } from "./utils/errors.js";
 import cors from "cors";
 import passport from "passport";
 import "./config/passport.js";
+import adminRoutes from "./routes/admin.routes.js";
+import applicationRoutes from "./routes/application.routes.js";
 dotenv.config();
 
 const app = express();
@@ -32,6 +34,8 @@ app.get("/api/health", (req, res) => {
 
 // Custom routes - MUST come before error handler
 app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/application", applicationRoutes);
 
 // Error handling middleware - MUST be last (after all routes)
 app.use(errorHandler);
