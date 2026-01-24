@@ -6,7 +6,7 @@ export const generateAccessToken = (user) =>
       id: user.id,
       email: user.email,
       username: user.username,
-      isInstructor: user.isInstructor,
+      role: user.role, // ✅ Include role for admin/user authorization
     },
     process.env.ACCESS_TOKEN_SECRET,
     { expiresIn: process.env.ACCESS_TOKEN_EXPIRE }

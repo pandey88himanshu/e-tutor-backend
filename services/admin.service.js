@@ -88,4 +88,23 @@ export class AdminService {
     });
     // ⚡ TRANSACTION END
   }
+  async deleteApplication(id) {
+    // First check if the application exists
+    const existingApplication = await prisma.instructorApplication.findUnique({
+      where: { id },
+    });
+
+    if (!existingApplication) {
+      throw new ValidationError("Application not found");
+    }
+
+    // Now delete the application
+    const deletedApplication = await prisma.instructorApplication.delete({
+      where: { id },
+    });
+
+    return deletedApplication;
+  }
 }
+
+

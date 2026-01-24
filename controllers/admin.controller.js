@@ -33,6 +33,25 @@ export const getApplicationDetails = async (req, res, next) => {
   }
 };
 
+// DELETE /api/admin/applications/:id
+export const deleteApplication = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    console.log("🗑️ Delete request received for application ID:", id);
+
+    const application = await adminService.deleteApplication(id);
+    console.log("✅ Application deleted successfully:", application.id);
+
+    res.status(200).json({
+      status: "success",
+      data: application,
+    });
+  } catch (error) {
+    console.error("❌ Delete failed:", error.message);
+    next(error);
+  }
+};
+
 // POST /api/admin/applications/:id/review
 export const reviewApplication = async (req, res, next) => {
   try {

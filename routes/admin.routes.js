@@ -2,6 +2,7 @@ import express from "express";
 import {
   getAllApplications,
   getApplicationDetails,
+  deleteApplication,
   reviewApplication,
 } from "../controllers/admin.controller.js";
 import { authenticate, authorize } from "../middlewares/auth.middleware.js";
@@ -22,6 +23,9 @@ router.get("/applications", getAllApplications);
 
 // Get single application details
 router.get("/applications/:id", getApplicationDetails);
+
+// Delete an application
+router.delete("/applications/:id", deleteApplication);
 
 // Approve or Reject
 router.post("/applications/:id/review", reviewApplication);
