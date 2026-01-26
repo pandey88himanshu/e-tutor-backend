@@ -72,6 +72,34 @@ export class AuthService {
     });
   }
 
+  // Get complete user with all relations
+  async findUserByIdWithRelations(userId) {
+    return await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        provider: true,
+        bio: true,
+        profileImage: true,
+        createdAt: true,
+        updatedAt: true,
+        // Relations
+        instructorApplication: true,
+        createdCourses: true,
+        purchases: {
+          include: {
+            course: true,
+          },
+        },
+      },
+    });
+  }
+
   async verifyPassword(plainPassword, hashedPassword) {
     // Handle null password for OAuth users
     if (!hashedPassword) {

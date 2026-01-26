@@ -292,6 +292,29 @@ export const logout = async (req, res, next) => {
   }
 };
 
+/* GET CURRENT USER (ME) */
+export const getMe = async (req, res, next) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      throw new AuthenticationError("User not authenticated");
+    }
+
+    // Get complete user with all relations
+    const user = await authService.findUserByIdWithRelations(userId);
+
+    if (!user) {
+      throw new AuthenticationError("User not found");
+    }
+
+    // Return complete user data with relations (sensitive fields already excluded in select)
+    res.json({ user });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /* CHECK USERNAME */
 export const checkUsername = async (req, res, next) => {
   try {
