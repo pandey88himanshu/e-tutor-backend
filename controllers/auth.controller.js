@@ -264,11 +264,12 @@ export const refreshToken = async (req, res, next) => {
 
     await authService.updateRefreshToken(user.id, newRefreshToken);
 
+    const isProduction = process.env.NODE_ENV === "production";
     res.cookie("refreshToken", newRefreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/auth/refresh",
+      secure: isProduction, // Required when sameSite is "none"
+      sameSite: isProduction ? "none" : "lax", // "none" for cross-origin in production
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
     return res.json({ accessToken });
@@ -285,7 +286,12 @@ export const logout = async (req, res, next) => {
       await tokenService.deleteAccessToken(userId);
       await authService.clearRefreshToken(userId);
     }
-    res.clearCookie("refreshToken");
+    const isProduction = process.env.NODE_ENV === "production";
+    res.clearCookie("refreshToken", {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+    });
     res.json({ message: "Logged out successfully" });
   } catch (error) {
     next(error);
