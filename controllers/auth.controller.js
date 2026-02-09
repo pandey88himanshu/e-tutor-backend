@@ -238,9 +238,15 @@ export const signin = async (req, res, next) => {
 /* REFRESH TOKEN */
 export const refreshToken = async (req, res, next) => {
   try {
+    // Debug logging for cookie issues
+    console.log("🔄 Refresh token request received");
+    console.log("🍪 Cookies received:", JSON.stringify(req.cookies));
+    console.log("📋 Request headers origin:", req.headers.origin);
+
     const oldRefreshToken = req.cookies.refreshToken;
 
     if (!oldRefreshToken) {
+      console.log("❌ No refresh token in cookies");
       throw new AuthenticationError("Refresh token not provided");
     }
 
@@ -269,6 +275,7 @@ export const refreshToken = async (req, res, next) => {
       httpOnly: true,
       secure: isProduction, // Required when sameSite is "none"
       sameSite: isProduction ? "none" : "lax", // "none" for cross-origin in production
+      path: "/", // Cookie accessible on all routes
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
@@ -291,6 +298,7 @@ export const logout = async (req, res, next) => {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
+      path: "/", // Must match the path used when setting
     });
     res.json({ message: "Logged out successfully" });
   } catch (error) {

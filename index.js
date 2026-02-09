@@ -12,9 +12,17 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT;
+
+// Debug: Log important environment variables on startup
+console.log("🚀 Server starting with configuration:");
+console.log(`   NODE_ENV: ${process.env.NODE_ENV}`);
+console.log(`   FRONTEND_URL: ${process.env.FRONTEND_URL}`);
+
 const corsOptions = {
   origin: process.env.FRONTEND_URL,
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
 };
 
 // Middleware

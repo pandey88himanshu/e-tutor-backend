@@ -51,10 +51,12 @@ export class TokenService {
 
   createCookieOptions() {
     const isProduction = process.env.NODE_ENV === "production";
+    console.log(`🍪 Cookie options - NODE_ENV: ${process.env.NODE_ENV}, isProduction: ${isProduction}`);
     return {
       httpOnly: true,
       secure: isProduction, // Required when sameSite is "none"
       sameSite: isProduction ? "none" : "lax", // "none" for cross-origin in production
+      path: "/", // Cookie accessible on all routes
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     };
   }
