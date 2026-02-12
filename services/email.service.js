@@ -16,9 +16,8 @@ export class EmailService {
   async sendOTPEmail(email, otp, username) {
     try {
       const info = await this.transporter.sendMail({
-        from: `"${process.env.APP_NAME || "Your App"}" <${
-          process.env.SMTP_FROM
-        }>`,
+        from: `"${process.env.APP_NAME || "Your App"}" <${process.env.SMTP_FROM
+          }>`,
         to: email,
         subject: "Verify Your Email - OTP Code",
         html: this.getOTPEmailTemplate(otp, username),
@@ -143,6 +142,190 @@ export class EmailService {
                       color: rgb(176, 179, 189); /* gray-400 */
                     ">
                       — Team Support
+                    </p>
+                  </td>
+                </tr>
+
+              </table>
+              <!-- END CARD -->
+
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `;
+  }
+
+  /**
+   * Send interview invitation email with VAPI interview link
+   */
+  async sendInterviewLinkEmail(email, interviewLink, applicantName) {
+    try {
+      const info = await this.transporter.sendMail({
+        from: `"${process.env.APP_NAME || "E-Tutor"}" <${process.env.SMTP_FROM}>`,
+        to: email,
+        subject: "🎤 Your Instructor Screening Interview — E-Tutor",
+        html: this.getInterviewEmailTemplate(interviewLink, applicantName),
+      });
+
+      console.log("✅ Interview email sent to:", email);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error("Interview email sending failed:", error);
+      throw new Error("Failed to send interview email");
+    }
+  }
+
+  getInterviewEmailTemplate(interviewLink, applicantName) {
+    return `
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Interview Invitation</title>
+      </head>
+      <body style="
+        margin: 0;
+        padding: 0;
+        background-color: rgb(248, 249, 251);
+        font-family: Arial, Helvetica, sans-serif;
+      ">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td align="center" style="padding: 40px 16px;">
+              
+              <!-- CARD -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="
+                max-width: 480px;
+                background-color: rgb(255, 255, 255);
+                border-radius: 8px;
+                padding: 32px;
+              ">
+                
+                <!-- HEADER -->
+                <tr>
+                  <td align="center" style="padding-bottom: 24px;">
+                    <h1 style="
+                      margin: 0;
+                      font-size: 28px;
+                      line-height: 36px;
+                      font-weight: 600;
+                      color: rgb(24, 28, 35);
+                    ">
+                      🎤 Interview Invitation
+                    </h1>
+                  </td>
+                </tr>
+
+                <!-- GREETING -->
+                <tr>
+                  <td style="padding-bottom: 16px;">
+                    <p style="
+                      margin: 0;
+                      font-size: 16px;
+                      line-height: 22px;
+                      color: rgb(55, 60, 71);
+                    ">
+                      Hello ${applicantName || "there"},
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- MESSAGE -->
+                <tr>
+                  <td style="padding-bottom: 24px;">
+                    <p style="
+                      margin: 0;
+                      font-size: 14px;
+                      line-height: 22px;
+                      color: rgb(113, 118, 134);
+                    ">
+                      Thank you for applying to become an instructor on <strong>E-Tutor</strong>!
+                      As part of our screening process, we'd like you to complete a brief
+                      <strong>AI-powered voice interview</strong>. It takes about <strong>1 minute</strong>
+                      and involves 3 quick questions.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- CTA BUTTON -->
+                <tr>
+                  <td align="center" style="padding-bottom: 24px;">
+                    <a href="${interviewLink}" target="_blank" style="
+                      display: inline-block;
+                      padding: 14px 32px;
+                      background-color: rgb(255, 109, 61);
+                      color: rgb(255, 255, 255);
+                      text-decoration: none;
+                      border-radius: 6px;
+                      font-size: 16px;
+                      font-weight: 600;
+                      letter-spacing: 0.5px;
+                    ">
+                      Start Interview →
+                    </a>
+                  </td>
+                </tr>
+
+                <!-- LINK FALLBACK -->
+                <tr>
+                  <td style="padding-bottom: 24px;">
+                    <p style="
+                      margin: 0;
+                      font-size: 12px;
+                      line-height: 18px;
+                      color: rgb(149, 154, 165);
+                      word-break: break-all;
+                    ">
+                      If the button doesn't work, copy and paste this link:<br/>
+                      <a href="${interviewLink}" style="color: rgb(255, 109, 61);">${interviewLink}</a>
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- INSTRUCTIONS -->
+                <tr>
+                  <td style="padding-bottom: 16px;">
+                    <p style="
+                      margin: 0;
+                      font-size: 13px;
+                      line-height: 20px;
+                      color: rgb(113, 118, 134);
+                    ">
+                      <strong>How it works:</strong><br/>
+                      1. Click the link above to open the interview page.<br/>
+                      2. Allow microphone access when prompted.<br/>
+                      3. Answer 3 quick questions (one word or short sentence each).<br/>
+                      4. The interview will end automatically.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- FOOTER TEXT -->
+                <tr>
+                  <td style="padding-bottom: 8px;">
+                    <p style="
+                      margin: 0;
+                      font-size: 12px;
+                      line-height: 16px;
+                      color: rgb(149, 154, 165);
+                    ">
+                      If you did not apply to become an instructor, please ignore this email.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- SIGNATURE -->
+                <tr>
+                  <td style="padding-top: 16px;">
+                    <p style="
+                      margin: 0;
+                      font-size: 12px;
+                      color: rgb(176, 179, 189);
+                    ">
+                      — E-Tutor Team
                     </p>
                   </td>
                 </tr>

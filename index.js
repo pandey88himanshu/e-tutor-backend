@@ -8,6 +8,7 @@ import passport from "passport";
 import "./config/passport.js";
 import adminRoutes from "./routes/admin.routes.js";
 import applicationRoutes from "./routes/application.routes.js";
+import interviewRoutes from "./routes/interview.routes.js";
 dotenv.config();
 
 const app = express();
@@ -44,6 +45,7 @@ app.get("/api/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/application", applicationRoutes);
+app.use("/api/interview", interviewRoutes);
 
 // Error handling middleware - MUST be last (after all routes)
 app.use(errorHandler);

@@ -269,6 +269,7 @@ export const refreshToken = async (req, res, next) => {
     });
 
     await authService.updateRefreshToken(user.id, newRefreshToken);
+    await tokenService.storeAccessToken(user.id, accessToken); // ✅ FIX: Store new access token in Redis
 
     const isProduction = process.env.NODE_ENV === "production";
     res.cookie("refreshToken", newRefreshToken, {
